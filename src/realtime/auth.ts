@@ -1,22 +1,39 @@
 import type { IncomingMessage } from "http";
-import cookie from "cookie";
+import { parse as parseCookie } from "cookie"; // ✅ correct import
 import { env } from "../config/env";
 import { SessionModel } from "../modules/sessions/session.model";
 
-export async function getSessionFromSocketReq(req: IncomingMessage) {
-  const raw = req.headers.cookie || "";
-  const parsed = cookie.parse(raw || "");
+export async function getSessionFromSocketReq(req: IncomingMessage): Promise<{
+  sessionId: string;
+  sessionKey: string;
+} | null> {
+  try {
+    const raw = String(req.headers?.cookie || "").trim();
+    if (!raw) return null;
 
-  const cookieName = env.SESSION_COOKIE_NAME || "bc_session";
-  const sessionKey = (parsed[cookieName] || "").trim();
+    // ✅ safe cookie parsing
+    const parsed = parseCookie(raw);
 
-  if (!sessionKey) return null;
+    const cookieName = env.SESSION_COOKIE_NAME || "bc_session";
+    const sessionKey = String(parsed?.[cookieName] || "").trim();
 
-  const session = await SessionModel.findOne({
-    sessionKey,
-    endedAt: null,
-  }).lean();
-  if (!session) return null;
+    if (!sessionKey) return null;
 
-  return { sessionId: String(session._id), sessionKey };
+    const session = await SessionModel.findOne({
+      sessionKey,
+      endedAt: null,
+    })
+      .select({ _id: 1, sessionKey: 1 })
+      .lean();
+
+    if (!session) return null;
+
+    return {
+      sessionId: String(session._id),
+      sessionKey: String(session.sessionKey),
+    };
+  } catch {
+    // ❗ socket auth must never crash
+    return null;
+  }
 }

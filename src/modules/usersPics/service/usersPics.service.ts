@@ -11,7 +11,7 @@ function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-const ONLINE_ZSET = "online:sessions:z"; // must match online.store.ts
+const ONLINE_ZSET = "online:sessions:z";
 
 export async function listUserPics(args: {
   q?: string;

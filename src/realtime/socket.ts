@@ -11,7 +11,7 @@ import type {
 } from "./socket.types";
 
 import { getSessionFromSocketReq } from "./auth";
-import { SessionModel } from "../modules/sessions/session.model"; // ✅ add this
+import { SessionModel } from "../modules/sessions/session.model";
 
 import { bindRoomHandlers } from "../realtime/handlers/rooms.handlers";
 import { bindMessageHandlers } from "../realtime/handlers/messages.handlers";
@@ -31,7 +31,9 @@ async function getSessionFromHandshakeAuth(socket: any) {
   const session = await SessionModel.findOne({
     sessionKey: key,
     endedAt: null,
-  }).lean();
+  })
+    .select({ _id: 1, sessionKey: 1 })
+    .lean();
 
   if (!session) return null;
 
@@ -46,7 +48,7 @@ export function initSocket(server: http.Server) {
     SocketData
   >(server, {
     cors: {
-      origin: env.CORS_ORIGIN, // e.g. http://localhost:3000
+      origin: env.CORS_ORIGIN,
       credentials: true,
     },
     transports: ["websocket", "polling"],
@@ -57,43 +59,71 @@ export function initSocket(server: http.Server) {
   const sub = redis.duplicate();
   io.adapter(createAdapter(pub, sub));
 
-  // ✅ Auth middleware
   io.use(async (socket, next) => {
     try {
-      // Debug (optional but useful)
-      // console.log("[socket] origin:", socket.request.headers.origin);
-      // console.log("[socket] cookie:", socket.request.headers.cookie || "(none)");
-      // console.log("[socket] auth:", socket.handshake?.auth);
+      const origin = socket.request?.headers?.origin;
+      const cookieHeader = socket.request?.headers?.cookie || "";
+      const handshakeKey = String(
+        socket.handshake?.auth?.sessionKey || ""
+      ).trim();
 
-      // 1) cookie-based (existing)
+      console.log("[socket-auth] origin:", origin);
+      console.log(
+        "[socket-auth] cookieHeader:",
+        cookieHeader ? "(present)" : "(none)"
+      );
+      console.log(
+        "[socket-auth] handshakeKey:",
+        handshakeKey ? `${handshakeKey.slice(0, 6)}...` : "(none)"
+      );
+
+      // 1) cookie-based
       let s = await getSessionFromSocketReq(socket.request);
 
-      // 2) fallback: handshake auth payload (recommended)
-      if (!s) {
-        s = await getSessionFromHandshakeAuth(socket);
+      if (s) {
+        console.log("[socket-auth] cookie-based OK:", s.sessionId);
+      } else {
+        console.log("[socket-auth] cookie-based MISS");
       }
 
-      if (!s) return next(new Error("UNAUTHORIZED"));
+      // 2) handshake auth fallback
+      if (!s) {
+        s = await getSessionFromHandshakeAuth(socket);
+        if (s) console.log("[socket-auth] handshake-based OK:", s.sessionId);
+        else console.log("[socket-auth] handshake-based MISS");
+      }
+
+      if (!s) {
+        console.log("[socket-auth] UNAUTHORIZED (no session)");
+        return next(new Error("UNAUTHORIZED"));
+      }
 
       socket.data.sessionId = s.sessionId;
       socket.data.sessionKey = s.sessionKey;
 
-      // personal room for targeted emits (dm/invites/calls)
       socket.join(`session:${s.sessionId}`);
 
       return next();
-    } catch (e) {
+    } catch (e: any) {
+      console.log("[socket-auth] ERROR:", e?.message || e);
       return next(new Error("UNAUTHORIZED"));
     }
   });
 
   io.on("connection", async (socket) => {
-    // ✅ global online
+    console.log(
+      "[socket] connected:",
+      socket.id,
+      "sessionId:",
+      socket.data.sessionId
+    );
+
     try {
       await markSessionOnline(socket.data.sessionId);
-    } catch {}
+    } catch (e: any) {
+      console.log("[presence] markSessionOnline failed:", e?.message || e);
+    }
 
-    // ✅ bind all realtime handlers per socket connection
     bindRoomHandlers(io, socket);
     bindMessageHandlers(io, socket);
     bindDmHandlers(io, socket);
@@ -102,9 +132,17 @@ export function initSocket(server: http.Server) {
     bindVideoGroupHandlers(io, socket);
 
     socket.on("disconnect", async () => {
+      console.log(
+        "[socket] disconnected:",
+        socket.id,
+        "sessionId:",
+        socket.data.sessionId
+      );
       try {
         await markSessionOffline(socket.data.sessionId);
-      } catch {}
+      } catch (e: any) {
+        console.log("[presence] markSessionOffline failed:", e?.message || e);
+      }
     });
   });
 
