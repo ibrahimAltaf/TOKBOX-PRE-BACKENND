@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { nanoid } from "nanoid";
 import type { Request } from "express";
+import mongoose from "mongoose";
 import { SessionModel } from "../session.model";
 
 export function sha256(input: string) {
@@ -14,13 +15,22 @@ export function getClientIp(req: Request): string | null {
   return xf || req.socket.remoteAddress || null;
 }
 
+function isValidObjectId(id: string) {
+  return mongoose.isValidObjectId(id);
+}
+
 export async function ensureSession(args: {
   sessionKey?: string | null;
   ip?: string | null;
   fingerprint?: string | null;
+
   nickname?: string;
   about?: string;
   avatarUrl?: string;
+
+  // ✅ added
+  photos?: string[];
+  introVideoUrl?: string;
 }) {
   const key = (args.sessionKey ?? "").trim() || nanoid(32);
 
@@ -31,12 +41,18 @@ export async function ensureSession(args: {
   const existing = await SessionModel.findOne({ sessionKey: key });
 
   if (existing) {
-    if (existing.endedAt) existing.endedAt = null; // revive if ended
+    if (existing.endedAt) existing.endedAt = null;
     existing.lastSeenAt = now;
 
     if (args.nickname !== undefined) existing.nickname = args.nickname;
     if (args.about !== undefined) existing.about = args.about;
     if (args.avatarUrl !== undefined) existing.avatarUrl = args.avatarUrl;
+
+    // ✅ optional
+    if (args.photos !== undefined) (existing as any).photos = args.photos ?? [];
+    if (args.introVideoUrl !== undefined) {
+      (existing as any).introVideoUrl = args.introVideoUrl ?? null;
+    }
 
     if (!existing.ipHash && ipHash) existing.ipHash = ipHash;
     if (!existing.fingerprintHash && fingerprintHash) {
@@ -53,6 +69,13 @@ export async function ensureSession(args: {
     about: args.about ?? null,
     avatarUrl: args.avatarUrl ?? null,
     avatarMediaId: null,
+
+    // ✅ optional
+    photos: args.photos ?? [],
+    photoMediaIds: [],
+    introVideoUrl: args.introVideoUrl ?? null,
+    introVideoMediaId: null,
+
     ipHash,
     fingerprintHash,
     lastSeenAt: now,
@@ -69,10 +92,17 @@ export async function getSessionByKey(sessionKey: string) {
 
 export async function updateMe(args: {
   sessionKey: string;
+
   nickname?: string;
   about?: string;
   avatarUrl?: string;
   avatarMediaId?: string;
+
+  // ✅ added
+  photos?: string[];
+  photoMediaIds?: string[];
+  introVideoUrl?: string;
+  introVideoMediaId?: string;
 }) {
   const s = await getSessionByKey(args.sessionKey);
   if (!s) return null;
@@ -81,10 +111,34 @@ export async function updateMe(args: {
   if (args.about !== undefined) s.about = args.about;
   if (args.avatarUrl !== undefined) s.avatarUrl = args.avatarUrl;
 
-  // avatarMediaId is optional, only if you have a Media module later
   if (args.avatarMediaId !== undefined) {
-    // Keep as string; mongoose will cast if valid ObjectId
-    (s as any).avatarMediaId = args.avatarMediaId || null;
+    (s as any).avatarMediaId =
+      args.avatarMediaId && isValidObjectId(args.avatarMediaId)
+        ? new mongoose.Types.ObjectId(args.avatarMediaId)
+        : null;
+  }
+
+  // ✅ gallery urls
+  if (args.photos !== undefined) (s as any).photos = args.photos ?? [];
+
+  // ✅ gallery ids
+  if (args.photoMediaIds !== undefined) {
+    (s as any).photoMediaIds = (args.photoMediaIds ?? [])
+      .filter(isValidObjectId)
+      .map((id) => new mongoose.Types.ObjectId(id));
+  }
+
+  // ✅ intro video url
+  if (args.introVideoUrl !== undefined) {
+    (s as any).introVideoUrl = args.introVideoUrl ?? null;
+  }
+
+  // ✅ intro video id
+  if (args.introVideoMediaId !== undefined) {
+    (s as any).introVideoMediaId =
+      args.introVideoMediaId && isValidObjectId(args.introVideoMediaId)
+        ? new mongoose.Types.ObjectId(args.introVideoMediaId)
+        : null;
   }
 
   s.lastSeenAt = new Date();
@@ -110,6 +164,13 @@ export function toSessionResponse(s: any) {
     about: s.about,
     avatarUrl: s.avatarUrl,
     avatarMediaId: s.avatarMediaId ? String(s.avatarMediaId) : null,
+
+    // ✅ added
+    photos: s.photos ?? [],
+    photoMediaIds: (s.photoMediaIds ?? []).map((x: any) => String(x)),
+    introVideoUrl: s.introVideoUrl ?? null,
+    introVideoMediaId: s.introVideoMediaId ? String(s.introVideoMediaId) : null,
+
     lastSeenAt: s.lastSeenAt,
     endedAt: s.endedAt,
     createdAt: s.createdAt,

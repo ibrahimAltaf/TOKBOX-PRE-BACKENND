@@ -11,17 +11,32 @@ import type {
 } from "./socket.types";
 
 import { getSessionFromSocketReq } from "./auth";
+import { SessionModel } from "../modules/sessions/session.model"; // ✅ add this
 
 import { bindRoomHandlers } from "../realtime/handlers/rooms.handlers";
 import { bindMessageHandlers } from "../realtime/handlers/messages.handlers";
 import { bindDmHandlers } from "../realtime/handlers/dm.handlers";
 import { bindInviteHandlers } from "../realtime/handlers/invites.handlers";
 import { bindCallHandlers } from "../realtime/handlers/calls.handlers";
-
+import { bindVideoGroupHandlers } from "../realtime/handlers/videoGroup.handlers";
 import {
   markSessionOnline,
   markSessionOffline,
 } from "../realtime/presence/online.store";
+
+async function getSessionFromHandshakeAuth(socket: any) {
+  const key = String(socket.handshake?.auth?.sessionKey || "").trim();
+  if (!key) return null;
+
+  const session = await SessionModel.findOne({
+    sessionKey: key,
+    endedAt: null,
+  }).lean();
+
+  if (!session) return null;
+
+  return { sessionId: String(session._id), sessionKey: key };
+}
 
 export function initSocket(server: http.Server) {
   const io = new SocketIOServer<
@@ -31,7 +46,7 @@ export function initSocket(server: http.Server) {
     SocketData
   >(server, {
     cors: {
-      origin: env.CORS_ORIGIN,
+      origin: env.CORS_ORIGIN, // e.g. http://localhost:3000
       credentials: true,
     },
     transports: ["websocket", "polling"],
@@ -42,10 +57,22 @@ export function initSocket(server: http.Server) {
   const sub = redis.duplicate();
   io.adapter(createAdapter(pub, sub));
 
-  // Auth middleware
+  // ✅ Auth middleware
   io.use(async (socket, next) => {
     try {
-      const s = await getSessionFromSocketReq(socket.request);
+      // Debug (optional but useful)
+      // console.log("[socket] origin:", socket.request.headers.origin);
+      // console.log("[socket] cookie:", socket.request.headers.cookie || "(none)");
+      // console.log("[socket] auth:", socket.handshake?.auth);
+
+      // 1) cookie-based (existing)
+      let s = await getSessionFromSocketReq(socket.request);
+
+      // 2) fallback: handshake auth payload (recommended)
+      if (!s) {
+        s = await getSessionFromHandshakeAuth(socket);
+      }
+
       if (!s) return next(new Error("UNAUTHORIZED"));
 
       socket.data.sessionId = s.sessionId;
@@ -55,7 +82,7 @@ export function initSocket(server: http.Server) {
       socket.join(`session:${s.sessionId}`);
 
       return next();
-    } catch {
+    } catch (e) {
       return next(new Error("UNAUTHORIZED"));
     }
   });
@@ -72,6 +99,7 @@ export function initSocket(server: http.Server) {
     bindDmHandlers(io, socket);
     bindInviteHandlers(io, socket);
     bindCallHandlers(io, socket);
+    bindVideoGroupHandlers(io, socket);
 
     socket.on("disconnect", async () => {
       try {

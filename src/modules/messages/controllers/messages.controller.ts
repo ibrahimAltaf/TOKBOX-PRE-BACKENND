@@ -1,57 +1,61 @@
+// src/modules/messages/controllers/messages.controller.ts
 import type { Request, Response } from "express";
-import {
-  SendMessageSchema,
-  ListMessagesSchema,
-} from "../schemas/messages.schemas";
+import { z } from "zod";
+import type { AuthedRequest } from "../../sessions/middleware/requireSession";
 import {
   listRoomMessages,
   sendRoomMessage,
   toMessageResponse,
 } from "../service/messages.service";
-import type { AuthedRequest } from "../../sessions/middleware/requireSession";
 
-export async function postRoomMessageController(req: Request, res: Response) {
-  const roomId = String(req.params.roomId || "").trim();
+const ListQuery = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(30),
+  cursor: z.string().optional(),
+});
 
-  const parsed = SendMessageSchema.safeParse(req.body ?? {});
-  if (!parsed.success) {
-    return res.status(400).json({ ok: false, error: parsed.error.flatten() });
-  }
+const SendBody = z.object({
+  text: z.string().optional(),
+  mediaUrls: z.array(z.string()).optional(),
+  mediaIds: z.array(z.string()).optional(),
+});
 
-  const senderSessionId = (req as AuthedRequest).session.id;
-
-  const out = await sendRoomMessage({
-    roomId,
-    senderSessionId,
-    text: parsed.data.text,
-    mediaUrls: parsed.data.mediaUrls,
-    mediaIds: parsed.data.mediaIds,
-  });
-
-  if (!out.ok) return res.status(400).json({ ok: false, error: out.error });
-
-  return res.json({ ok: true, message: toMessageResponse(out.message) });
-}
-
-export async function getRoomMessagesController(req: Request, res: Response) {
-  const roomId = String(req.params.roomId || "").trim();
-
-  const parsed = ListMessagesSchema.safeParse(req.query ?? {});
-  if (!parsed.success) {
-    return res.status(400).json({ ok: false, error: parsed.error.flatten() });
-  }
+export async function listRoomMessagesController(req: Request, res: Response) {
+  const roomId = String(req.params.roomId || "");
+  const q = ListQuery.parse(req.query);
 
   const out = await listRoomMessages({
     roomId,
-    limit: parsed.data.limit,
-    cursor: parsed.data.cursor,
+    limit: q.limit,
+    cursor: q.cursor,
   });
 
-  if (!out.ok) return res.status(400).json({ ok: false, error: out.error });
+  if (!out.ok) return res.status(400).json(out);
+
+  // NOTE: your service returns newest-first; many UIs prefer oldest-first
+  // If your frontend expects newest-first, remove `.reverse()`.
+  const items = out.messages.map(toMessageResponse).reverse();
 
   return res.json({
     ok: true,
-    messages: out.messages.map(toMessageResponse),
+    messages: items,
     nextCursor: out.nextCursor,
   });
+}
+
+export async function sendRoomMessageController(req: Request, res: Response) {
+  const roomId = String(req.params.roomId || "");
+  const meSessionId = (req as AuthedRequest).session.id;
+  const body = SendBody.parse(req.body);
+
+  const out = await sendRoomMessage({
+    roomId,
+    senderSessionId: meSessionId,
+    text: body.text,
+    mediaUrls: body.mediaUrls,
+    mediaIds: body.mediaIds,
+  });
+
+  if (!out.ok) return res.status(400).json(out);
+
+  return res.json({ ok: true, message: toMessageResponse(out.message) });
 }

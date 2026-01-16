@@ -6,6 +6,7 @@ const Query = z.object({
   q: z.string().max(60).optional(),
   limit: z.coerce.number().int().min(1).max(200).default(60),
   onlineOnly: z.coerce.boolean().optional().default(true),
+  cursor: z.string().optional(), // ✅ add
 });
 
 export async function listUserPicsController(req: Request, res: Response) {
@@ -15,7 +16,12 @@ export async function listUserPicsController(req: Request, res: Response) {
     q: q.q,
     limit: q.limit,
     onlineOnly: q.onlineOnly,
+    cursor: q.cursor,
   });
 
-  return res.json({ ok: true, users: out.users });
+  return res.json({
+    ok: true,
+    users: out.users,
+    nextCursor: out.nextCursor ?? null,
+  });
 }

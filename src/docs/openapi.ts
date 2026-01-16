@@ -1,3 +1,4 @@
+// src/docs/openapi.ts
 export const openapi = {
   openapi: "3.0.3",
   info: {
@@ -11,11 +12,11 @@ export const openapi = {
     { name: "Health", description: "Service health checks" },
     { name: "Sessions", description: "Anonymous session lifecycle" },
     { name: "Rooms", description: "Public rooms and room management" },
+    { name: "RoomMembers", description: "Room membership, roles, kick/ban" },
     { name: "Media", description: "Upload and manage media files" },
     { name: "Messages", description: "Room messages (text + media)" },
     { name: "DM", description: "Private messaging (1-to-1 threads)" },
-    { name: "Invites", description: "Invite links + internal invites" },
-    { name: "RoomMembers", description: "Room membership, roles, kick/ban" },
+    { name: "Invites", description: "Invite links + internal targeted invites" },
     { name: "Users", description: "Online users and discovery" },
     {
       name: "UsersPics",
@@ -64,32 +65,6 @@ export const openapi = {
         responses: {
           "200": {
             description: "Session created/refreshed",
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    ok: { type: "boolean", example: true },
-                    session: {
-                      type: "object",
-                      properties: {
-                        id: { type: "string" },
-                        sessionKey: { type: "string" },
-                        nickname: { type: "string", nullable: true },
-                        about: { type: "string", nullable: true },
-                        avatarUrl: { type: "string", nullable: true },
-                        lastSeenAt: { type: "string", format: "date-time" },
-                        endedAt: {
-                          type: "string",
-                          format: "date-time",
-                          nullable: true,
-                        },
-                      },
-                    },
-                  },
-                },
-              },
-            },
           },
         },
       },
@@ -105,7 +80,6 @@ export const openapi = {
           "401": { description: "Missing or invalid session" },
         },
       },
-
       patch: {
         tags: ["Sessions"],
         summary: "Update current anonymous session",
@@ -131,7 +105,6 @@ export const openapi = {
           "401": { description: "Missing or invalid session" },
         },
       },
-
       delete: {
         tags: ["Sessions"],
         summary: "End current anonymous session",
@@ -160,16 +133,11 @@ export const openapi = {
             },
           },
           { name: "q", in: "query", schema: { type: "string" } },
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 20 },
-          },
+          { name: "limit", in: "query", schema: { type: "integer", default: 20 } },
           { name: "cursor", in: "query", schema: { type: "string" } },
         ],
         responses: { "200": { description: "Rooms list" } },
       },
-
       post: {
         tags: ["Rooms"],
         summary: "Create a room (requires session)",
@@ -205,33 +173,17 @@ export const openapi = {
       get: {
         tags: ["Rooms"],
         summary: "Get room by id",
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         responses: {
           "200": { description: "Room details" },
           "404": { description: "Not found" },
         },
       },
-
       patch: {
         tags: ["Rooms"],
-        summary:
-          "Update room (requires session; owner/admin enforcement later)",
+        summary: "Update room (requires session; owner/admin enforcement later)",
         security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         requestBody: {
           required: true,
           content: {
@@ -252,22 +204,101 @@ export const openapi = {
           "401": { description: "Unauthorized" },
         },
       },
-
       delete: {
         tags: ["Rooms"],
         summary: "Close room (requires session; owner/admin enforcement later)",
         security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "id",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
         responses: {
           "200": { description: "Room closed" },
           "401": { description: "Unauthorized" },
+        },
+      },
+    },
+
+    // ===========================
+    // RoomMembers
+    // ===========================
+    "/rooms/{roomId}/join": {
+      post: {
+        tags: ["RoomMembers"],
+        summary: "Join a room (creates/updates membership)",
+        security: [{ SessionCookie: [] }],
+        parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Joined" },
+          "400": { description: "Join failed" },
+        },
+      },
+    },
+
+    "/rooms/{roomId}/leave": {
+      post: {
+        tags: ["RoomMembers"],
+        summary: "Leave a room",
+        security: [{ SessionCookie: [] }],
+        parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
+        responses: { "200": { description: "Left" } },
+      },
+    },
+
+    "/rooms/{roomId}/members": {
+      get: {
+        tags: ["RoomMembers"],
+        summary: "List active room members",
+        security: [{ SessionCookie: [] }],
+        parameters: [
+          { name: "roomId", in: "path", required: true, schema: { type: "string" } },
+          { name: "limit", in: "query", schema: { type: "integer", default: 100 } },
+        ],
+        responses: { "200": { description: "Members list" } },
+      },
+    },
+
+    "/rooms/{roomId}/kick": {
+      post: {
+        tags: ["RoomMembers"],
+        summary: "Kick a member (OWNER only)",
+        security: [{ SessionCookie: [] }],
+        parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { targetSessionId: { type: "string" } } },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Kicked" },
+          "403": { description: "Forbidden" },
+        },
+      },
+    },
+
+    "/rooms/{roomId}/ban": {
+      post: {
+        tags: ["RoomMembers"],
+        summary: "Ban a member (OWNER only)",
+        security: [{ SessionCookie: [] }],
+        parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  targetSessionId: { type: "string" },
+                  minutes: { type: "integer", example: 60 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Banned" },
+          "403": { description: "Forbidden" },
         },
       },
     },
@@ -305,22 +336,16 @@ export const openapi = {
       },
     },
 
+    // ===========================
+    // Messages
+    // ===========================
     "/rooms/{roomId}/messages": {
       get: {
         tags: ["Messages"],
         summary: "List room messages (paginated)",
         parameters: [
-          {
-            name: "roomId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 30 },
-          },
+          { name: "roomId", in: "path", required: true, schema: { type: "string" } },
+          { name: "limit", in: "query", schema: { type: "integer", default: 30 } },
           { name: "cursor", in: "query", schema: { type: "string" } },
         ],
         responses: { "200": { description: "Messages list" } },
@@ -329,14 +354,7 @@ export const openapi = {
         tags: ["Messages"],
         summary: "Send room message (requires session)",
         security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "roomId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        parameters: [{ name: "roomId", in: "path", required: true, schema: { type: "string" } }],
         requestBody: {
           required: true,
           content: {
@@ -358,6 +376,10 @@ export const openapi = {
         },
       },
     },
+
+    // ===========================
+    // DM
+    // ===========================
     "/dm/threads": {
       post: {
         tags: ["DM"],
@@ -370,6 +392,7 @@ export const openapi = {
               schema: {
                 type: "object",
                 properties: { targetSessionId: { type: "string" } },
+                required: ["targetSessionId"],
               },
             },
           },
@@ -384,11 +407,7 @@ export const openapi = {
         summary: "List my DM threads",
         security: [{ SessionCookie: [] }],
         parameters: [
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 30 },
-          },
+          { name: "limit", in: "query", schema: { type: "integer", default: 30 } },
           { name: "cursor", in: "query", schema: { type: "string" } },
         ],
         responses: {
@@ -404,17 +423,8 @@ export const openapi = {
         summary: "List DM messages",
         security: [{ SessionCookie: [] }],
         parameters: [
-          {
-            name: "threadId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 30 },
-          },
+          { name: "threadId", in: "path", required: true, schema: { type: "string" } },
+          { name: "limit", in: "query", schema: { type: "integer", default: 30 } },
           { name: "cursor", in: "query", schema: { type: "string" } },
         ],
         responses: {
@@ -426,14 +436,7 @@ export const openapi = {
         tags: ["DM"],
         summary: "Send DM message",
         security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "threadId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        parameters: [{ name: "threadId", in: "path", required: true, schema: { type: "string" } }],
         requestBody: {
           required: true,
           content: {
@@ -456,21 +459,18 @@ export const openapi = {
       },
     },
 
-    "/invites/preview/{token}": {
+    // ===========================
+    // Invites (matches your routes)
+    // ===========================
+    "/invites/incoming": {
       get: {
         tags: ["Invites"],
-        summary: "Preview invite by token (no session required)",
-        parameters: [
-          {
-            name: "token",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        summary: "List incoming internal invites (targeted)",
+        security: [{ SessionCookie: [] }],
+        parameters: [{ name: "limit", in: "query", schema: { type: "integer", default: 30 } }],
         responses: {
-          "200": { description: "Invite preview" },
-          "404": { description: "Not found" },
+          "200": { description: "Incoming invites" },
+          "401": { description: "Unauthorized" },
         },
       },
     },
@@ -486,10 +486,12 @@ export const openapi = {
             "application/json": {
               schema: {
                 type: "object",
+                required: ["kind", "maxUses"],
                 properties: {
                   kind: {
                     type: "string",
                     enum: ["ROOM", "DM", "VIDEO_GROUP", "VIDEO_1ON1"],
+                    example: "ROOM",
                   },
                   roomId: { type: "string" },
                   dmThreadId: { type: "string" },
@@ -503,231 +505,78 @@ export const openapi = {
         },
         responses: {
           "200": { description: "Invite created" },
-          "401": { description: "Unauthorized" },
-        },
-      },
-    },
-
-    "/invites/incoming": {
-      get: {
-        tags: ["Invites"],
-        summary: "List incoming internal invites (targeted)",
-        security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 30 },
-          },
-        ],
-        responses: {
-          "200": { description: "Incoming invites" },
-          "401": { description: "Unauthorized" },
-        },
-      },
-    },
-
-    "/invites/accept": {
-      post: {
-        tags: ["Invites"],
-        summary: "Accept invite (requires session)",
-        security: [{ SessionCookie: [] }],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { token: { type: "string" } },
-              },
-            },
-          },
-        },
-        responses: {
-          "200": { description: "Accepted" },
+          "400": { description: "Validation error" },
           "401": { description: "Unauthorized" },
         },
       },
     },
 
     "/invites/{token}": {
-      delete: {
+      get: {
         tags: ["Invites"],
-        summary: "Revoke invite (inviter only)",
-        security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "token",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        summary: "Get invite by token (public preview)",
+        parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
         responses: {
-          "200": { description: "Revoked" },
+          "200": { description: "Invite" },
+          "404": { description: "Not found" },
+        },
+      },
+    },
+
+    "/invites/{token}/accept": {
+      post: {
+        tags: ["Invites"],
+        summary: "Accept invite token (requires session)",
+        security: [{ SessionCookie: [] }],
+        parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
+        responses: {
+          "200": { description: "Accepted" },
+          "400": { description: "Cannot accept" },
           "401": { description: "Unauthorized" },
         },
       },
     },
 
-    "/rooms/{roomId}/join": {
+    "/invites/{token}/revoke": {
       post: {
-        tags: ["RoomMembers"],
-        summary: "Join a room (creates/updates membership)",
+        tags: ["Invites"],
+        summary: "Revoke invite token (inviter only) (requires session)",
         security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "roomId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
+        parameters: [{ name: "token", in: "path", required: true, schema: { type: "string" } }],
         responses: {
-          "200": { description: "Joined" },
-          "400": { description: "Join failed" },
+          "200": { description: "Revoked" },
+          "400": { description: "Cannot revoke" },
+          "401": { description: "Unauthorized" },
         },
       },
     },
 
-    "/rooms/{roomId}/leave": {
-      post: {
-        tags: ["RoomMembers"],
-        summary: "Leave a room",
-        security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "roomId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
-        responses: { "200": { description: "Left" } },
-      },
-    },
-
-    "/rooms/{roomId}/members": {
-      get: {
-        tags: ["RoomMembers"],
-        summary: "List active room members",
-        security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "roomId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 100 },
-          },
-        ],
-        responses: { "200": { description: "Members list" } },
-      },
-    },
-
-    "/rooms/{roomId}/kick": {
-      post: {
-        tags: ["RoomMembers"],
-        summary: "Kick a member (OWNER only)",
-        security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "roomId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: { targetSessionId: { type: "string" } },
-              },
-            },
-          },
-        },
-        responses: {
-          "200": { description: "Kicked" },
-          "403": { description: "Forbidden" },
-        },
-      },
-    },
-
-    "/rooms/{roomId}/ban": {
-      post: {
-        tags: ["RoomMembers"],
-        summary: "Ban a member (OWNER only)",
-        security: [{ SessionCookie: [] }],
-        parameters: [
-          {
-            name: "roomId",
-            in: "path",
-            required: true,
-            schema: { type: "string" },
-          },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  targetSessionId: { type: "string" },
-                  minutes: { type: "integer", example: 60 },
-                },
-              },
-            },
-          },
-        },
-        responses: {
-          "200": { description: "Banned" },
-          "403": { description: "Forbidden" },
-        },
-      },
-    },
+    // ===========================
+    // Users / UsersPics
+    // ===========================
     "/users/online": {
       get: {
         tags: ["Users"],
         summary: "List online users (global)",
         parameters: [
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 60 },
-          },
+          { name: "limit", in: "query", schema: { type: "integer", default: 60 } },
           { name: "cursor", in: "query", schema: { type: "string" } },
         ],
         responses: { "200": { description: "Online users" } },
       },
     },
+
     "/users-pics": {
       get: {
         tags: ["UsersPics"],
         summary: "List users with photos (online-only by default)",
         parameters: [
           { name: "q", in: "query", schema: { type: "string" } },
-          {
-            name: "limit",
-            in: "query",
-            schema: { type: "integer", default: 60 },
-          },
-          {
-            name: "onlineOnly",
-            in: "query",
-            schema: { type: "boolean", default: true },
-          },
+          { name: "limit", in: "query", schema: { type: "integer", default: 60 } },
+          { name: "onlineOnly", in: "query", schema: { type: "boolean", default: true } },
+          { name: "cursor", in: "query", schema: { type: "string" } },
         ],
-        responses: {
-          "200": { description: "Users list" },
-        },
+        responses: { "200": { description: "Users list" } },
       },
     },
   },
@@ -737,7 +586,9 @@ export const openapi = {
       SessionCookie: {
         type: "apiKey",
         in: "cookie",
-        name: process.env.SESSION_COOKIE_NAME || "bc_session",
+        // IMPORTANT: OpenAPI is a static object; keep a stable name here.
+        // Your runtime cookie name can differ; middleware will read env.
+        name: "bc_session",
       },
     },
   },

@@ -69,6 +69,67 @@ export type ClientToServerEvents = {
     payload: { callId: string; reason?: string },
     cb?: (res: any) => void
   ) => void;
+
+    "vg:start": (
+    payload: { roomId: string; maxUsers?: number },
+    cb?: (res: any) => void
+  ) => void;
+
+  "vg:join": (
+    payload: { roomId: string },
+    cb?: (res: any) => void
+  ) => void;
+
+  "vg:leave": (
+    payload: { roomId: string },
+    cb?: (res: any) => void
+  ) => void;
+
+  "vg:offer": (
+    payload: { roomId: string; toSessionId: string; sdp: any },
+    cb?: (res: any) => void
+  ) => void;
+
+  "vg:answer": (
+    payload: { roomId: string; toSessionId: string; sdp: any },
+    cb?: (res: any) => void
+  ) => void;
+
+  "vg:ice": (
+    payload: { roomId: string; toSessionId: string; candidate: any },
+    cb?: (res: any) => void
+  ) => void;
+
+  "vg:kick": (
+    payload: { roomId: string; targetSessionId: string },
+    cb?: (res: any) => void
+  ) => void;
+
+  "vg:close": (
+    payload: { roomId: string; reason?: string },
+    cb?: (res: any) => void
+  ) => void;
+ "invite:create": (
+    payload: {
+      kind: "ROOM" | "DM" | "VIDEO_GROUP" | "VIDEO_1ON1";
+      roomId?: string;
+      dmThreadId?: string;
+      targetSessionId?: string; // if set => internal invite (targeted)
+      maxUses?: number; // default 1
+      ttlMinutes?: number; // optional
+    },
+    cb?: (res: any) => void
+  ) => void;
+
+  "invite:accept": (
+    payload: { token: string },
+    cb?: (res: any) => void
+  ) => void;
+
+  "invite:revoke": (
+    payload: { token: string },
+    cb?: (res: any) => void
+  ) => void;
 };
 
 export type ServerToClientEvents = {
@@ -118,6 +179,33 @@ export type ServerToClientEvents = {
   }) => void;
 
   "call:busy": (payload: { targetSessionId: string }) => void;
+    "vg:started": (payload: {
+    roomId: string;
+    ownerSessionId: string;
+    maxUsers: number;
+  }) => void;
+
+  "vg:members": (payload: { roomId: string; sessionIds: string[] }) => void;
+
+  "vg:offer": (payload: { roomId: string; fromSessionId: string; sdp: any }) => void;
+  "vg:answer": (payload: { roomId: string; fromSessionId: string; sdp: any }) => void;
+  "vg:ice": (payload: { roomId: string; fromSessionId: string; candidate: any }) => void;
+
+  "vg:kicked": (payload: { roomId: string; bySessionId: string }) => void;
+
+  "vg:closed": (payload: { roomId: string; reason: string; bySessionId?: string | null }) => void;
+    
+
+  "invite:accepted": (payload: {
+    token: string;
+    kind: "ROOM" | "DM" | "VIDEO_GROUP" | "VIDEO_1ON1";
+    acceptedBySessionId: string;
+  }) => void;
+
+  "invite:revoked": (payload: {
+    token: string;
+  }) => void;
+
 };
 
 export type SocketData = {

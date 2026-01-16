@@ -3,7 +3,7 @@ import {
   deleteMeController,
   ensureSessionController,
   getMeController,
-  patchMeController,
+  patchMeController,socketAuthController
 } from "../controllers/sessions.controller";
 import { requireSession } from "../middleware/requireSession";
 
@@ -20,3 +20,4 @@ sessionsRouter.patch("/me", requireSession, patchMeController);
 
 // End session (requires valid session)
 sessionsRouter.delete("/me", requireSession, deleteMeController);
+sessionsRouter.post("/socket-auth", socketAuthController);

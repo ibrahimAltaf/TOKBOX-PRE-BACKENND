@@ -16,42 +16,56 @@ export function bindMessageHandlers(
   socket: Socket<ClientToServerEvents, ServerToClientEvents, {}, SocketData>
 ) {
   socket.on("msg:send", async (payload, cb) => {
-    const { roomId, text, mediaUrls, mediaIds } = payload;
+    try {
+      const { roomId, text, mediaUrls, mediaIds } = payload;
 
-    const out = await sendRoomMessage({
-      roomId,
-      senderSessionId: socket.data.sessionId,
-      text,
-      mediaUrls,
-      mediaIds,
-    });
+      const out = await sendRoomMessage({
+        roomId,
+        senderSessionId: socket.data.sessionId,
+        text,
+        mediaUrls,
+        mediaIds,
+      });
 
-    if (!out.ok) {
-      cb?.({ ok: false, error: out.error });
-      return;
+      if (!out.ok) {
+        cb?.({ ok: false, error: out.error });
+        return;
+      }
+
+      const message = toMessageResponse(out.message);
+
+      // ✅ Keep your existing emit shape (roomId + message)
+      io.to(roomNamespace(roomId)).emit("msg:new", { roomId, message });
+
+      cb?.({ ok: true, message });
+    } catch (e: any) {
+      cb?.({ ok: false, error: e?.message ?? "SEND_FAILED" });
     }
-
-    const message = toMessageResponse(out.message);
-    io.to(roomNamespace(roomId)).emit("msg:new", { roomId, message });
-
-    cb?.({ ok: true, message });
   });
 
   socket.on("typing:start", async ({ roomId }, cb) => {
-    io.to(roomNamespace(roomId)).emit("typing:update", {
-      roomId,
-      sessionId: socket.data.sessionId,
-      isTyping: true,
-    });
-    cb?.({ ok: true });
+    try {
+      io.to(roomNamespace(roomId)).emit("typing:update", {
+        roomId,
+        sessionId: socket.data.sessionId,
+        isTyping: true,
+      });
+      cb?.({ ok: true });
+    } catch (e: any) {
+      cb?.({ ok: false, error: e?.message ?? "TYPING_START_FAILED" });
+    }
   });
 
   socket.on("typing:stop", async ({ roomId }, cb) => {
-    io.to(roomNamespace(roomId)).emit("typing:update", {
-      roomId,
-      sessionId: socket.data.sessionId,
-      isTyping: false,
-    });
-    cb?.({ ok: true });
+    try {
+      io.to(roomNamespace(roomId)).emit("typing:update", {
+        roomId,
+        sessionId: socket.data.sessionId,
+        isTyping: false,
+      });
+      cb?.({ ok: true });
+    } catch (e: any) {
+      cb?.({ ok: false, error: e?.message ?? "TYPING_STOP_FAILED" });
+    }
   });
 }

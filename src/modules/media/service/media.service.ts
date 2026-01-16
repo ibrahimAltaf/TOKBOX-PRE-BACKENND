@@ -1,67 +1,32 @@
-import { MediaModel } from "../media.model";
-import { makeObjectKey, uploadToSpaces } from "./spaces";
+import path from "path";
 
-function detectMediaType(mime: string) {
-  if (mime.startsWith("image/")) return "IMAGE" as const;
-  if (mime.startsWith("video/")) return "VIDEO" as const;
-  if (mime.startsWith("audio/")) return "AUDIO" as const;
-  return "OTHER" as const;
+const PUBLIC_UPLOAD_BASE = (process.env.PUBLIC_UPLOAD_BASE || "/uploads").replace(/\/$/, "");
+
+function safeFolder(input: unknown) {
+  const raw = String(input ?? "chat-media").trim() || "chat-media";
+  return raw.replace(/^\/+|\/+$/g, "").replace(/\.\./g, "");
 }
 
 export async function uploadFiles(args: {
   uploaderSessionId: string;
   files: Express.Multer.File[];
-  folder: string; // e.g. "avatars" | "session-videos" | "chat-media"
+  folder: string;
 }) {
-  if (!args.files?.length) return [];
+  const folder = safeFolder(args.folder);
+  const files = args.files ?? [];
 
-  const results = [];
+  return files.map((f: any) => {
+    const filename = String(f.filename || "");
+    const relKey = path.join(folder, filename).replace(/\\/g, "/");
+    const url = `${PUBLIC_UPLOAD_BASE}/${relKey}`.replace(/\/{2,}/g, "/");
 
-  for (const f of args.files) {
-    const type = detectMediaType(f.mimetype);
-
-    // Basic allowlist (adjust if needed)
-    const allowed =
-      f.mimetype.startsWith("image/") ||
-      f.mimetype.startsWith("video/") ||
-      f.mimetype.startsWith("audio/");
-
-    if (!allowed) {
-      throw new Error(`Unsupported file type: ${f.mimetype}`);
-    }
-
-    const key = makeObjectKey({
-      folder: args.folder,
+    return {
+      key: relKey,
+      url,
       originalName: f.originalname,
-    });
-
-    const up = await uploadToSpaces({
-      buffer: f.buffer,
       mimeType: f.mimetype,
-      key,
-    });
-
-    const doc = await MediaModel.create({
-      uploaderSessionId: args.uploaderSessionId,
-      type,
-      mime: f.mimetype,
       size: f.size,
-      url: up.url,
-      storageKey: up.key,
-      expiresAt: null, // later set via admin retention rules
-      deletedAt: null,
-    });
-
-    results.push({
-      id: String(doc._id),
-      type: doc.type,
-      mime: doc.mime,
-      size: doc.size,
-      url: doc.url,
-      storageKey: doc.storageKey,
-      createdAt: doc.createdAt,
-    });
-  }
-
-  return results;
+      uploaderSessionId: args.uploaderSessionId,
+    };
+  });
 }

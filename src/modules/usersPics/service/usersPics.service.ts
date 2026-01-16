@@ -1,9 +1,7 @@
 import mongoose from "mongoose";
-import { SessionModel } from "../../sessions/session.model"; 
-import {
-  listOnlineSessionIds,
-  isSessionOnline,
-} from "../../../realtime/presence/online.store";
+import { SessionModel } from "../../sessions/session.model";
+import { listOnlineSessionIds } from "../../../realtime/presence/online.store";
+import { redis } from "../../../lib/redis";
 
 function isValidObjectId(id: string) {
   return mongoose.isValidObjectId(id);
@@ -13,21 +11,26 @@ function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const ONLINE_ZSET = "online:sessions:z"; // must match online.store.ts
+
 export async function listUserPics(args: {
   q?: string;
   limit: number;
   onlineOnly: boolean;
+  cursor?: string;
 }) {
   const limit = Math.max(1, Math.min(200, Number(args.limit || 60)));
   const onlineOnly = !!args.onlineOnly;
 
-  // If onlineOnly => get online IDs from redis then query Mongo by _id in [ids]
   if (onlineOnly) {
-    // pull more than limit because some sessions could be ended/null
-    const scan = await listOnlineSessionIds({ limit: Math.max(limit * 3, 60) });
+    // get ordered online IDs + cursor (score-based)
+    const online = await listOnlineSessionIds({
+      limit: Math.max(limit * 3, 60),
+      cursor: args.cursor,
+    });
 
-    const onlineIds = scan.sessionIds.filter(isValidObjectId);
-    if (!onlineIds.length) return { users: [] as any[] };
+    const onlineIds = online.sessionIds.filter(isValidObjectId);
+    if (!onlineIds.length) return { users: [] as any[], nextCursor: null };
 
     const where: any = {
       _id: { $in: onlineIds.map((x) => new mongoose.Types.ObjectId(x)) },
@@ -52,12 +55,17 @@ export async function listUserPics(args: {
         createdAt: 1,
         updatedAt: 1,
       })
-      .limit(limit)
       .lean();
 
-    // keep only users that have pics (optional, typical in BullChat)
-    const users = docs
+    // preserve online ordering
+    const byId = new Map<string, any>();
+    for (const d of docs) byId.set(String((d as any)._id), d);
+
+    const users = onlineIds
+      .map((id) => byId.get(id))
+      .filter(Boolean)
       .filter((u: any) => (u.photos?.length || 0) > 0 || !!u.avatarUrl)
+      .slice(0, limit)
       .map((u: any) => ({
         id: String(u._id),
         nickname: u.nickname ?? null,
@@ -73,10 +81,10 @@ export async function listUserPics(args: {
         updatedAt: u.updatedAt,
       }));
 
-    return { users };
+    return { users, nextCursor: online.nextCursor };
   }
 
-  // If not onlineOnly => query latest sessions (endedAt null) and compute online flag
+  // Not onlineOnly: fetch sessions then mark online in batch (no N+1)
   const where: any = { endedAt: null };
 
   if (args.q) {
@@ -101,12 +109,24 @@ export async function listUserPics(args: {
     .limit(limit)
     .lean();
 
-  const users = [];
-  for (const u of docs) {
-    const id = String((u as any)._id);
-    const online = await isSessionOnline(id);
+  const ids = docs.map((u: any) => String(u._id));
 
-    users.push({
+  // batch online check: ZSCORE in pipeline
+  const pipe = redis.pipeline();
+  for (const id of ids) pipe.zscore(ONLINE_ZSET, id);
+
+  const results = (await pipe.exec()) ?? []; // ✅ exec can be null
+
+  const onlineMap = new Map<string, boolean>();
+  results.forEach((r, i) => {
+    const val = r?.[1];
+    onlineMap.set(ids[i], val !== null && val !== undefined);
+  });
+
+  const users = docs.map((u: any) => {
+    const id = String((u as any)._id);
+
+    return {
       id,
       nickname: (u as any).nickname ?? null,
       about: (u as any).about ?? null,
@@ -116,11 +136,11 @@ export async function listUserPics(args: {
       lat: (u as any).lat ?? null,
       lng: (u as any).lng ?? null,
       lastSeenAt: (u as any).lastSeenAt ?? null,
-      online,
+      online: onlineMap.get(id) ?? false,
       createdAt: (u as any).createdAt,
       updatedAt: (u as any).updatedAt,
-    });
-  }
+    };
+  });
 
-  return { users };
+  return { users, nextCursor: null };
 }
