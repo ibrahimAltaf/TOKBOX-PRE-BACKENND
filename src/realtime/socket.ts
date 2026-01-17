@@ -47,11 +47,18 @@ export function initSocket(server: http.Server) {
     {},
     SocketData
   >(server, {
+    // ✅ allow any origin + credentials (echo origin)
     cors: {
-      origin: env.CORS_ORIGIN,
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        return cb(null, true);
+      },
       credentials: true,
+      methods: ["GET", "POST"],
     },
+
     transports: ["websocket", "polling"],
+    allowEIO3: true,
   });
 
   // Redis adapter (for scaling across multiple Node instances)

@@ -1,3 +1,6 @@
+// ==============================
+// src/main.ts
+// ==============================
 import "dotenv/config";
 
 import http from "http";
@@ -16,7 +19,7 @@ import { buildRouter } from "./routes";
 import { initSocket } from "./realtime/socket";
 
 function resolveUploadRoot() {
-  const candidate = env.UPLOAD_ROOT || "";
+  const candidate = (env.UPLOAD_ROOT || "").trim();
 
   // ✅ Block unwritable/system paths (Render will throw EACCES)
   const isBad =
@@ -25,9 +28,10 @@ function resolveUploadRoot() {
     candidate.startsWith("/root") ||
     candidate.startsWith("/etc") ||
     candidate.startsWith("/bin") ||
-    candidate.startsWith("/usr");
+    candidate.startsWith("/usr") ||
+    candidate.startsWith("/var/lib");
 
-  // ✅ Prefer persistent disk if you mounted it, else /tmp
+  // ✅ Prefer persistent disk if you mounted it, else /tmp (always writable)
   const root = isBad ? path.join("/tmp", "uploads") : candidate;
 
   fs.mkdirSync(root, { recursive: true });
@@ -44,20 +48,31 @@ async function bootstrap() {
 
   const app = express();
 
+  // ✅ CORS: allow any origin (echo origin) + allow credentials
+  // ⚠️ Security note: this is permissive. Prefer a strict allowlist in production.
   app.use(
     cors({
-      origin: [env.CORS_ORIGIN],
+      origin: (origin, cb) => {
+        // allow tools/server-to-server without Origin header
+        if (!origin) return cb(null, true);
+        return cb(null, true); // allow all
+      },
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       allowedHeaders: ["Content-Type", "Authorization"],
     })
   );
 
+  // preflight
+  app.options("*", cors({ origin: true, credentials: true }));
+
   app.use(express.json());
   app.use(cookieParser());
 
+  // ✅ Serve uploads from same root multer uses
   app.use(env.PUBLIC_UPLOAD_BASE, express.static(UPLOAD_ROOT));
 
+  // routes
   app.use(buildRouter());
 
   app.get("/health", async (_req, res) => {
