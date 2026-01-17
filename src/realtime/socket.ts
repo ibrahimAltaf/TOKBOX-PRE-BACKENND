@@ -19,9 +19,11 @@ import { bindDmHandlers } from "../realtime/handlers/dm.handlers";
 import { bindInviteHandlers } from "../realtime/handlers/invites.handlers";
 import { bindCallHandlers } from "../realtime/handlers/calls.handlers";
 import { bindVideoGroupHandlers } from "../realtime/handlers/videoGroup.handlers";
+
 import {
   markSessionOnline,
   markSessionOffline,
+  onlineCount,
 } from "../realtime/presence/online.store";
 
 async function getSessionFromHandshakeAuth(socket: any) {
@@ -37,57 +39,7 @@ async function getSessionFromHandshakeAuth(socket: any) {
 
   if (!session) return null;
 
-  return { sessionId: String(session._id), sessionKey: key };
-}
-
-/** -----------------------------------------
- * Presence stability:
- * - Keep per-session socket count
- * - Only mark offline when count hits 0
- * - Add small delay to avoid flicker on reconnect
- * ----------------------------------------*/
-const sessionSockets = new Map<string, Set<string>>();
-const offlineTimers = new Map<string, NodeJS.Timeout>();
-const OFFLINE_DELAY_MS = 1500;
-
-function addSocket(sessionId: string, socketId: string) {
-  let set = sessionSockets.get(sessionId);
-  if (!set) {
-    set = new Set<string>();
-    sessionSockets.set(sessionId, set);
-  }
-  set.add(socketId);
-}
-
-function removeSocket(sessionId: string, socketId: string) {
-  const set = sessionSockets.get(sessionId);
-  if (!set) return 0;
-  set.delete(socketId);
-  if (set.size === 0) sessionSockets.delete(sessionId);
-  return set.size;
-}
-
-function clearOfflineTimer(sessionId: string) {
-  const t = offlineTimers.get(sessionId);
-  if (t) {
-    clearTimeout(t);
-    offlineTimers.delete(sessionId);
-  }
-}
-
-function scheduleOffline(sessionId: string, fn: () => Promise<void>) {
-  clearOfflineTimer(sessionId);
-  const t = setTimeout(async () => {
-    offlineTimers.delete(sessionId);
-
-    // still zero sockets?
-    const set = sessionSockets.get(sessionId);
-    if (set && set.size > 0) return;
-
-    await fn();
-  }, OFFLINE_DELAY_MS);
-
-  offlineTimers.set(sessionId, t);
+  return { sessionId: String((session as any)._id), sessionKey: key };
 }
 
 export function initSocket(server: http.Server) {
@@ -98,14 +50,23 @@ export function initSocket(server: http.Server) {
     SocketData
   >(server, {
     cors: {
-      // allow any origin + credentials
-      origin: (_origin, cb) => cb(null, true),
+      origin: (origin, cb) => {
+        if (!origin) return cb(null, true);
+        return cb(null, true); // ✅ allow all
+      },
       credentials: true,
+      methods: ["GET", "POST"],
     },
+
     transports: ["websocket", "polling"],
+
+    // ✅ helps on proxies like Render
+    allowEIO3: true,
+    pingInterval: 25000,
+    pingTimeout: 20000,
   });
 
-  // Redis adapter (scaling)
+  // ✅ Redis adapter (future scaling)
   const pub = redis;
   const sub = redis.duplicate();
   io.adapter(createAdapter(pub, sub));
@@ -117,7 +78,10 @@ export function initSocket(server: http.Server) {
       const handshakeKey = String(socket.handshake?.auth?.sessionKey || "").trim();
 
       console.log("[socket-auth] origin:", origin);
-      console.log("[socket-auth] cookieHeader:", cookieHeader ? "(present)" : "(none)");
+      console.log(
+        "[socket-auth] cookieHeader:",
+        cookieHeader ? "(present)" : "(none)"
+      );
       console.log(
         "[socket-auth] handshakeKey:",
         handshakeKey ? `${handshakeKey.slice(0, 6)}...` : "(none)"
@@ -125,15 +89,20 @@ export function initSocket(server: http.Server) {
 
       // 1) cookie-based
       let s = await getSessionFromSocketReq(socket.request);
-      console.log("[socket-auth] cookie-based", s ? `OK: ${s.sessionId}` : "MISS");
+      if (s) console.log("[socket-auth] cookie-based OK:", s.sessionId);
+      else console.log("[socket-auth] cookie-based MISS");
 
-      // 2) handshake-based
+      // 2) handshake auth fallback
       if (!s) {
         s = await getSessionFromHandshakeAuth(socket);
-        console.log("[socket-auth] handshake-based", s ? `OK: ${s.sessionId}` : "MISS");
+        if (s) console.log("[socket-auth] handshake-based OK:", s.sessionId);
+        else console.log("[socket-auth] handshake-based MISS");
       }
 
-      if (!s) return next(new Error("UNAUTHORIZED"));
+      if (!s) {
+        console.log("[socket-auth] UNAUTHORIZED (no session)");
+        return next(new Error("UNAUTHORIZED"));
+      }
 
       socket.data.sessionId = s.sessionId;
       socket.data.sessionKey = s.sessionKey;
@@ -147,21 +116,19 @@ export function initSocket(server: http.Server) {
   });
 
   io.on("connection", async (socket) => {
-    const sessionId = socket.data.sessionId;
+    console.log(
+      "[socket] connected:",
+      socket.id,
+      "sessionId:",
+      socket.data.sessionId
+    );
 
-    console.log("[socket] connected:", socket.id, "sessionId:", sessionId);
-
-    // ✅ presence: add socket + cancel offline timer
-    addSocket(sessionId, socket.id);
-    clearOfflineTimer(sessionId);
-
-    // ✅ mark online only once (first socket)
-    if (sessionSockets.get(sessionId)?.size === 1) {
-      try {
-        await markSessionOnline(sessionId);
-      } catch (e: any) {
-        console.log("[presence] markSessionOnline failed:", e?.message || e);
-      }
+    try {
+      await markSessionOnline(socket.data.sessionId);
+      const oc = await onlineCount();
+      console.log("[presence] onlineCount:", oc);
+    } catch (e: any) {
+      console.log("[presence] markSessionOnline failed:", e?.message || e);
     }
 
     bindRoomHandlers(io, socket);
@@ -171,20 +138,22 @@ export function initSocket(server: http.Server) {
     bindCallHandlers(io, socket);
     bindVideoGroupHandlers(io, socket);
 
-    socket.on("disconnect", async () => {
-      console.log("[socket] disconnected:", socket.id, "sessionId:", sessionId);
+    socket.on("disconnect", async (reason) => {
+      console.log(
+        "[socket] disconnected:",
+        socket.id,
+        "sessionId:",
+        socket.data.sessionId,
+        "reason:",
+        reason
+      );
 
-      const left = removeSocket(sessionId, socket.id);
-
-      // ✅ only offline when no sockets remain (with small delay)
-      if (left === 0) {
-        scheduleOffline(sessionId, async () => {
-          try {
-            await markSessionOffline(sessionId);
-          } catch (e: any) {
-            console.log("[presence] markSessionOffline failed:", e?.message || e);
-          }
-        });
+      try {
+        await markSessionOffline(socket.data.sessionId);
+        const oc = await onlineCount();
+        console.log("[presence] onlineCount:", oc);
+      } catch (e: any) {
+        console.log("[presence] markSessionOffline failed:", e?.message || e);
       }
     });
   });

@@ -14,20 +14,22 @@ import { redis } from "./lib/redis";
 import { mountSwagger } from "./docs/swagger";
 import { buildRouter } from "./routes";
 import { initSocket } from "./realtime/socket";
+import { onlineCount } from "./realtime/presence/online.store";
 
 function resolveUploadRoot() {
-  const candidate = (env.UPLOAD_ROOT || "").trim();
+  const candidate = (env.UPLOAD_ROOT || process.env.UPLOAD_ROOT || "").trim();
 
+  // ❌ system paths are not writable on Render
   const isBad =
     !candidate ||
     candidate.startsWith("/var/www") ||
+    candidate.startsWith("/var/data") ||
     candidate.startsWith("/root") ||
     candidate.startsWith("/etc") ||
     candidate.startsWith("/bin") ||
-    candidate.startsWith("/usr") ||
-    candidate.startsWith("/var/lib") ||
-    candidate.startsWith("/var/data"); // unless disk mounted
+    candidate.startsWith("/usr");
 
+  // ✅ Render-safe fallback
   const root = isBad ? path.join("/tmp", "uploads") : candidate;
 
   fs.mkdirSync(root, { recursive: true });
@@ -38,18 +40,17 @@ async function bootstrap() {
   const UPLOAD_ROOT = resolveUploadRoot();
 
   await connectMongo();
-
   await redis.ping();
   console.log("[redis] ping ok");
 
   const app = express();
 
-  // ✅ Allow any origin + credentials (echo origin)
+  // ✅ allow all origins (credentials-safe)
   app.use(
     cors({
       origin: (origin, cb) => {
-        if (!origin) return cb(null, true);
-        return cb(null, true);
+        if (!origin) return cb(null, true); // non-browser / server-to-server
+        return cb(null, true); // allow any origin
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -57,25 +58,34 @@ async function bootstrap() {
     })
   );
 
-  // ✅ IMPORTANT: remove app.options("*") / app.options("/*") — it crashes in your router setup
+  /**
+   * ✅ IMPORTANT:
+   * Express/router newer path-to-regexp versions can throw on "*" or "/*"
+   * So use regex instead of app.options("*", ...)
+   */
+  app.options(/.*/, cors({ origin: true, credentials: true }));
 
   app.use(express.json());
   app.use(cookieParser());
 
+  // ✅ serve uploads (same folder multer uses)
   app.use(env.PUBLIC_UPLOAD_BASE, express.static(UPLOAD_ROOT));
 
+  // routes
   app.use(buildRouter());
 
   app.get("/health", async (_req, res) => {
     try {
       const mongoOk = mongoose.connection.readyState === 1;
       await redis.ping();
+      const oc = await onlineCount();
 
       return res.json({
         ok: true,
         mongo: mongoOk ? "ok" : "down",
         redis: "ok",
         uploadsRoot: UPLOAD_ROOT,
+        onlineCount: oc,
       });
     } catch (e: any) {
       return res.status(500).json({
@@ -88,7 +98,6 @@ async function bootstrap() {
   mountSwagger(app);
 
   const server = http.createServer(app);
-
   initSocket(server);
 
   server.listen(env.PORT, () => {
