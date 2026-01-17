@@ -64,7 +64,7 @@ export async function listUserPics(args: {
     const users = onlineIds
       .map((id) => byId.get(id))
       .filter(Boolean)
-      .filter((u: any) => (u.photos?.length || 0) > 0 || !!u.avatarUrl)
+      // .filter((u: any) => (u.photos?.length || 0) > 0 || !!u.avatarUrl)
       .slice(0, limit)
       .map((u: any) => ({
         id: String(u._id),
