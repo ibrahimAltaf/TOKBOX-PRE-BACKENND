@@ -16,11 +16,19 @@ import { buildRouter } from "./routes";
 import { initSocket } from "./realtime/socket";
 
 function resolveUploadRoot() {
-  // ✅ Single source of truth + Render-safe fallback
-  const root =
-    env.UPLOAD_ROOT ||
-    process.env.UPLOAD_ROOT ||
-    path.join("/tmp", "uploads");
+  const candidate = env.UPLOAD_ROOT || "";
+
+  // ✅ Block unwritable/system paths (Render will throw EACCES)
+  const isBad =
+    !candidate ||
+    candidate.startsWith("/var/www") ||
+    candidate.startsWith("/root") ||
+    candidate.startsWith("/etc") ||
+    candidate.startsWith("/bin") ||
+    candidate.startsWith("/usr");
+
+  // ✅ Prefer persistent disk if you mounted it, else /tmp
+  const root = isBad ? path.join("/tmp", "uploads") : candidate;
 
   fs.mkdirSync(root, { recursive: true });
   return root;
@@ -48,7 +56,6 @@ async function bootstrap() {
   app.use(express.json());
   app.use(cookieParser());
 
-  // ✅ Serve uploads from the same root multer uses
   app.use(env.PUBLIC_UPLOAD_BASE, express.static(UPLOAD_ROOT));
 
   app.use(buildRouter());
