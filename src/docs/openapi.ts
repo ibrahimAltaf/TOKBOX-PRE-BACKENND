@@ -5,7 +5,7 @@ export const openapi = {
     title: "BullChat Clone API",
     version: "0.1.0",
     description:
-      "Anonymous BullChat-like realtime chat API (Express + Socket.IO).",
+      "Anonymous BullChat-like realtime chat API (Express + Socket.IO)....",
     "x-realtime": {
       transport: "socket.io",
       baseUrl: "https://tokbox.nl",
