@@ -16,11 +16,11 @@ import { buildRouter } from "./routes";
 import { initSocket } from "./realtime/socket";
 
 function resolveUploadRoot() {
-  // priority: env.UPLOAD_ROOT -> process.env.UPLOAD_ROOT -> default ./uploads
+  // ✅ Single source of truth + Render-safe fallback
   const root =
     env.UPLOAD_ROOT ||
     process.env.UPLOAD_ROOT ||
-    path.join(process.cwd(), "uploads");
+    path.join("/tmp", "uploads");
 
   fs.mkdirSync(root, { recursive: true });
   return root;
@@ -31,7 +31,6 @@ async function bootstrap() {
 
   await connectMongo();
 
-  // ✅ fail fast if redis not reachable
   await redis.ping();
   console.log("[redis] ping ok");
 
@@ -49,10 +48,9 @@ async function bootstrap() {
   app.use(express.json());
   app.use(cookieParser());
 
-  // ✅ uploads serve
+  // ✅ Serve uploads from the same root multer uses
   app.use(env.PUBLIC_UPLOAD_BASE, express.static(UPLOAD_ROOT));
 
-  // routes
   app.use(buildRouter());
 
   app.get("/health", async (_req, res) => {
@@ -64,6 +62,7 @@ async function bootstrap() {
         ok: true,
         mongo: mongoOk ? "ok" : "down",
         redis: "ok",
+        uploadsRoot: UPLOAD_ROOT,
       });
     } catch (e: any) {
       return res.status(500).json({
@@ -71,13 +70,6 @@ async function bootstrap() {
         error: e?.message ?? "unknown",
       });
     }
-  });
-
-  app.get("/debug/cookie", (req, res) => {
-    return res.json({
-      cookieHeader: req.headers.cookie || "",
-      parsed: req.cookies || {},
-    });
   });
 
   mountSwagger(app);
@@ -90,6 +82,7 @@ async function bootstrap() {
     console.log(`API:     http://localhost:${env.PORT}`);
     console.log(`Swagger: http://localhost:${env.PORT}/docs`);
     console.log(`Uploads: http://localhost:${env.PORT}${env.PUBLIC_UPLOAD_BASE}`);
+    console.log(`[uploads] root: ${UPLOAD_ROOT}`);
   });
 
   const shutdown = async (signal: string) => {

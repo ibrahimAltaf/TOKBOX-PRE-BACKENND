@@ -2,12 +2,13 @@ import multer from "multer";
 import path from "path";
 import crypto from "crypto";
 import fs from "fs";
+import { env } from "../../../config/env";
 
-const UPLOAD_ROOT = process.env.UPLOAD_ROOT || path.join(process.cwd(), "uploads");
+const UPLOAD_ROOT =
+  env.UPLOAD_ROOT || process.env.UPLOAD_ROOT || path.join("/tmp", "uploads");
 
 function safeFolder(input: unknown) {
   const raw = String(input ?? "chat-media").trim() || "chat-media";
-  // sanitize: no absolute, no ../
   return raw.replace(/^\/+|\/+$/g, "").replace(/\.\./g, "");
 }
 
@@ -18,10 +19,16 @@ function ensureDir(dirPath: string) {
 export const upload = multer({
   storage: multer.diskStorage({
     destination(req, _file, cb) {
-      const folder = safeFolder((req.body as any)?.folder);
-      const dest = path.join(UPLOAD_ROOT, folder);
-      ensureDir(dest);
-      cb(null, dest);
+      try {
+        const folder = safeFolder((req.body as any)?.folder);
+        const dest = path.join(UPLOAD_ROOT, folder);
+        ensureDir(dest);
+        return cb(null, dest);
+      } catch (e) {
+        const err = e instanceof Error ? e : new Error(String(e));
+        // multer callback signature requires (error, destination)
+        return cb(err, UPLOAD_ROOT);
+      }
     },
     filename(_req, file, cb) {
       const ext = path.extname(file.originalname || "");
