@@ -26,7 +26,7 @@ function resolveUploadRoot() {
     candidate.startsWith("/bin") ||
     candidate.startsWith("/usr") ||
     candidate.startsWith("/var/lib") ||
-    candidate.startsWith("/var/data"); // ✅ avoid unless you mounted disk
+    candidate.startsWith("/var/data"); // unless disk mounted
 
   const root = isBad ? path.join("/tmp", "uploads") : candidate;
 
@@ -44,7 +44,7 @@ async function bootstrap() {
 
   const app = express();
 
-  // ✅ allow any origin + credentials (echo origin)
+  // ✅ Allow any origin + credentials (echo origin)
   app.use(
     cors({
       origin: (origin, cb) => {
@@ -57,9 +57,7 @@ async function bootstrap() {
     })
   );
 
-  // ✅ FIX: "*" is invalid in new router versions
-  // (Optional) You can remove this line completely if you want.
-  app.options("/*", cors({ origin: true, credentials: true }));
+  // ✅ IMPORTANT: remove app.options("*") / app.options("/*") — it crashes in your router setup
 
   app.use(express.json());
   app.use(cookieParser());
