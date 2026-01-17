@@ -8,7 +8,7 @@ export const openapi = {
       "Anonymous BullChat-like realtime chat API (Express + Socket.IO).",
     "x-realtime": {
       transport: "socket.io",
-      baseUrl: "http://localhost:8080",
+      baseUrl: "https://tokbox.nl",
       authFlow: [
         "1) POST /sessions/ensure (sets session cookie)",
         "2) POST /sessions/socket-auth (returns { sessionKey })",
@@ -18,7 +18,8 @@ export const openapi = {
       note: "Swagger UI cannot open Socket.IO connections, this section documents the realtime contract only.",
     },
   },
-  servers: [{ url: "http://localhost:8080", description: "Local dev" }],
+  servers: [ { url: "https://tokbox.nl", description: "Production" },
+    { url: "http://localhost:8080", description: "Local dev" },],
   tags: [
     { name: "Health", description: "Service health checks" },
     { name: "Sessions", description: "Anonymous session lifecycle" },
