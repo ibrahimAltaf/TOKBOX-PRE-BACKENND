@@ -1,6 +1,3 @@
-// ==============================
-// src/main.ts
-// ==============================
 import "dotenv/config";
 
 import http from "http";
@@ -21,7 +18,6 @@ import { initSocket } from "./realtime/socket";
 function resolveUploadRoot() {
   const candidate = (env.UPLOAD_ROOT || "").trim();
 
-  // ✅ Block unwritable/system paths (Render will throw EACCES)
   const isBad =
     !candidate ||
     candidate.startsWith("/var/www") ||
@@ -29,9 +25,9 @@ function resolveUploadRoot() {
     candidate.startsWith("/etc") ||
     candidate.startsWith("/bin") ||
     candidate.startsWith("/usr") ||
-    candidate.startsWith("/var/lib");
+    candidate.startsWith("/var/lib") ||
+    candidate.startsWith("/var/data"); // ✅ avoid unless you mounted disk
 
-  // ✅ Prefer persistent disk if you mounted it, else /tmp (always writable)
   const root = isBad ? path.join("/tmp", "uploads") : candidate;
 
   fs.mkdirSync(root, { recursive: true });
@@ -48,14 +44,12 @@ async function bootstrap() {
 
   const app = express();
 
-  // ✅ CORS: allow any origin (echo origin) + allow credentials
-  // ⚠️ Security note: this is permissive. Prefer a strict allowlist in production.
+  // ✅ allow any origin + credentials (echo origin)
   app.use(
     cors({
       origin: (origin, cb) => {
-        // allow tools/server-to-server without Origin header
         if (!origin) return cb(null, true);
-        return cb(null, true); // allow all
+        return cb(null, true);
       },
       credentials: true,
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -63,16 +57,15 @@ async function bootstrap() {
     })
   );
 
-  // preflight
-  app.options("*", cors({ origin: true, credentials: true }));
+  // ✅ FIX: "*" is invalid in new router versions
+  // (Optional) You can remove this line completely if you want.
+  app.options("/*", cors({ origin: true, credentials: true }));
 
   app.use(express.json());
   app.use(cookieParser());
 
-  // ✅ Serve uploads from same root multer uses
   app.use(env.PUBLIC_UPLOAD_BASE, express.static(UPLOAD_ROOT));
 
-  // routes
   app.use(buildRouter());
 
   app.get("/health", async (_req, res) => {
