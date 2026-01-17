@@ -2,15 +2,17 @@ import mongoose from "mongoose";
 import { env } from "../config/env";
 
 export async function connectMongo() {
+  if (!env.MONGO_URI) {
+    throw new Error("MONGO_URI is missing in environment variables.");
+  }
+
   mongoose.set("strictQuery", true);
 
-  // Helpful logs in dev
   if (env.NODE_ENV !== "production") {
     mongoose.set("debug", false);
   }
 
   await mongoose.connect(env.MONGO_URI, {
-    // defaults are fine; keeping this explicit for clarity
     autoIndex: env.NODE_ENV !== "production",
   });
 

@@ -6,22 +6,34 @@ import mongoose from "mongoose";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import path from "path";
+import fs from "fs";
 
 import { env } from "./config/env";
 import { connectMongo, disconnectMongo } from "./db/mongo";
 import { redis } from "./lib/redis";
 import { mountSwagger } from "./docs/swagger";
 import { buildRouter } from "./routes";
-
 import { initSocket } from "./realtime/socket";
 
+function resolveUploadRoot() {
+  // priority: env.UPLOAD_ROOT -> process.env.UPLOAD_ROOT -> default ./uploads
+  const root =
+    env.UPLOAD_ROOT ||
+    process.env.UPLOAD_ROOT ||
+    path.join(process.cwd(), "uploads");
+
+  fs.mkdirSync(root, { recursive: true });
+  return root;
+}
+
 async function bootstrap() {
+  const UPLOAD_ROOT = resolveUploadRoot();
+
   await connectMongo();
+
+  // ✅ fail fast if redis not reachable
   await redis.ping();
   console.log("[redis] ping ok");
-
-  const UPLOAD_ROOT =
-    process.env.UPLOAD_ROOT || path.join(process.cwd(), "uploads");
 
   const app = express();
 
@@ -37,7 +49,8 @@ async function bootstrap() {
   app.use(express.json());
   app.use(cookieParser());
 
-  app.use("/uploads", express.static(UPLOAD_ROOT));
+  // ✅ uploads serve
+  app.use(env.PUBLIC_UPLOAD_BASE, express.static(UPLOAD_ROOT));
 
   // routes
   app.use(buildRouter());
@@ -76,7 +89,7 @@ async function bootstrap() {
   server.listen(env.PORT, () => {
     console.log(`API:     http://localhost:${env.PORT}`);
     console.log(`Swagger: http://localhost:${env.PORT}/docs`);
-    console.log(`Uploads: http://localhost:${env.PORT}/uploads`);
+    console.log(`Uploads: http://localhost:${env.PORT}${env.PUBLIC_UPLOAD_BASE}`);
   });
 
   const shutdown = async (signal: string) => {

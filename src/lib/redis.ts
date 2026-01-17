@@ -9,7 +9,7 @@ export const redisOptions: RedisOptions = {
   enableReadyCheck: true,
   connectTimeout: 10_000,
 
-  // DO Managed Redis uses TLS via rediss://
+  // ✅ TLS only when using rediss://
   tls: isTls ? {} : undefined,
 
   retryStrategy(times) {
@@ -18,11 +18,12 @@ export const redisOptions: RedisOptions = {
 };
 
 export const redis = new Redis(env.REDIS_URL, redisOptions);
-
-// Optional: dedicated pub/sub clients for Socket.IO adapter (later scaling)
 export const redisPub = new Redis(env.REDIS_URL, redisOptions);
 export const redisSub = new Redis(env.REDIS_URL, redisOptions);
 
-redis.on("connect", () => console.log("[redis] connected"));
-redis.on("ready", () => console.log("[redis] ready"));
-redis.on("error", (e) => console.error("[redis] error:", e.message));
+// ✅ attach handlers to ALL clients (prevents "Unhandled error event" spam)
+for (const c of [redis, redisPub, redisSub]) {
+  c.on("connect", () => console.log("[redis] connect"));
+  c.on("ready", () => console.log("[redis] ready"));
+  c.on("error", (e) => console.error("[redis] error:", e?.message ?? e));
+}
